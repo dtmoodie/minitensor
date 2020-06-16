@@ -143,7 +143,7 @@ namespace mt
         }
 
         template <class U>
-        Tensor(Tensor<U, D>&& other) : m_ptr(static_cast<void*>(other.getData()))
+        Tensor(Tensor<U, D>&& other) : m_ptr(static_cast<T*>(other.getData()))
         {
             const Shape<D>& other_shape = other.getShape();
             m_shape = copyScaled<sizeof(U), 1>(other_shape);
@@ -168,8 +168,8 @@ namespace mt
         }
 
         MT_XINLINE const Shape<D>& getShape() const { return m_shape; }
-        MT_XINLINE const void* getData() const { return m_ptr; }
-        MT_XINLINE void* getData() { return m_ptr; }
+        MT_XINLINE const T* getData() const { return m_ptr; }
+        MT_XINLINE T* getData() { return m_ptr; }
 
         template <class U>
         operator Tensor<U, D>()
@@ -191,7 +191,11 @@ namespace mt
 
         Tensor<T, D> operator*() const { return Tensor<T, D>(m_ptr, m_shape); }
 
-        TensorIterator& operator++() { m_ptr += m_stride; }
+        TensorIterator& operator++()
+        {
+            m_ptr += m_stride;
+            return *this;
+        }
         bool operator!=(const TensorIterator& other) const { return m_ptr != other.m_ptr; }
     };
 
@@ -206,7 +210,11 @@ namespace mt
 
         T& operator*() const { return *m_ptr; }
 
-        TensorIterator& operator++() { m_ptr += m_stride; }
+        TensorIterator& operator++()
+        {
+            m_ptr += m_stride;
+            return *this;
+        }
 
         bool operator!=(const TensorIterator& other) const { return m_ptr != other.m_ptr; }
     };

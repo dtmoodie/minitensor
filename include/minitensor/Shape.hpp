@@ -86,6 +86,18 @@ namespace mt
         }
         return out;
     }
+
+    template <uint32_t NUMERATOR, uint32_t DENOMINATOR, uint8_t N>
+    Shape<N> copyScaled(const Shape<N>& shape)
+    {
+        Shape<N> out_shape;
+        for (uint8_t i = 0; i < N; ++i)
+        {
+            out_shape.setShape(i, (NUMERATOR * shape[i]) / DENOMINATOR);
+            out_shape.setStride(i, (NUMERATOR * shape.getStride(i)) / DENOMINATOR);
+        }
+        return out_shape;
+    }
 } // namespace mt
 
 #include <ostream>

@@ -62,6 +62,17 @@ namespace mt
 
         void setShape(uint8_t dim, uint32_t size) { m_size[dim] = size; }
         void setStride(uint8_t dim, uint32_t stride) { m_stride[dim] = stride; }
+        bool operator==(const Shape& other) const
+        {
+            for (uint8_t i = 0; i < N; ++i)
+            {
+                if (m_size[i] != other[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
     };
 
     template <uint8_t N>

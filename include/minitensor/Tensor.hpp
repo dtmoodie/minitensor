@@ -42,6 +42,44 @@ namespace mt
         MT_XINLINE T* getData() { return m_ptr; }
     };
 
+    template <uint8_t D>
+    class Tensor<void, D>
+    {
+        void* m_ptr;
+        Shape<D> m_shape;
+
+      public:
+        Tensor(void* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
+        template <class U>
+        Tensor(Tensor<U, D>& other) : m_ptr(static_cast<void*>(other.getData()))
+        {
+            const Shape<D>& other_shape = other.getShape();
+            for (uint8_t i = 0; i < D; ++i)
+            {
+                m_shape.setShape(i, other_shape[i] * sizeof(U));
+                m_shape.setStride(i, other_shape.getStride(i) * sizeof(U));
+            }
+        }
+        Tensor(Tensor& other) = default;
+        Tensor(Tensor&& other) = default;
+
+        MT_XINLINE const Shape<D>& getShape() const { return m_shape; }
+        MT_XINLINE const void* getData() const { return m_ptr; }
+        MT_XINLINE void* getData() { return m_ptr; }
+
+        template <class U>
+        operator Tensor<U, D>()
+        {
+            Shape<D> out_shape;
+            for (uint8_t i = 0; i < D; ++i)
+            {
+                out_shape.setShape(i, m_shape[i] / sizeof(U));
+                out_shape.setStride(i, m_shape.getStride(i) / sizeof(U));
+            }
+            return Tensor<U, D>(static_cast<U*>(m_ptr), std::move(out_shape));
+        }
+    };
+
     template <class T, uint8_t D>
     class Tensor<const T, D>
     {
@@ -64,6 +102,45 @@ namespace mt
         MT_XINLINE const Shape<D>& getShape() const { return m_shape; }
         MT_XINLINE const T* getData() const { return m_ptr; }
         MT_XINLINE T* getData() { return m_ptr; }
+    };
+
+    template <uint8_t D>
+    class Tensor<const void, D>
+    {
+        const void* m_ptr;
+        Shape<D> m_shape;
+
+      public:
+        Tensor(const void* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
+        template <class U>
+        Tensor(const Tensor<U, D>& other) : m_ptr(static_cast<const void*>(other.getData()))
+        {
+            const Shape<D>& other_shape = other.getShape();
+            for (uint8_t i = 0; i < D; ++i)
+            {
+                m_shape.setShape(i, other_shape[i] * sizeof(U));
+                m_shape.setStride(i, other_shape.getStride(i) * sizeof(U));
+            }
+        }
+        Tensor(const Tensor& other) = default;
+        Tensor(Tensor&& other) = default;
+
+        MT_XINLINE const Shape<D>& getShape() const { return m_shape; }
+        MT_XINLINE const void* getData() const { return m_ptr; }
+        MT_XINLINE void* getData() { return m_ptr; }
+
+        template <class U>
+        operator Tensor<U, D>() const
+        {
+            static_assert(std::is_const<U>::value, "");
+            Shape<D> out_shape;
+            for (uint8_t i = 0; i < D; ++i)
+            {
+                out_shape.setShape(i, m_shape[i] / sizeof(U));
+                out_shape.setStride(i, m_shape.getStride(i) / sizeof(U));
+            }
+            return Tensor<U, D>(m_ptr, std::move(out_shape));
+        }
     };
 
     template <class T, uint8_t D>
@@ -171,6 +248,8 @@ namespace std
     template <class T, uint8_t D>
     ostream& operator<<(ostream& os, const mt::Tensor<T, D>& tensor)
     {
+        os << tensor.getShape();
+        os << "\nDataType: " << typeid(T).name() << '\n';
         mt::printTensor(os, tensor, std::string());
         return os;
     }

@@ -47,16 +47,24 @@ TEST(tensor, reverse_index)
     ASSERT_EQ(tensor(-1, 3), 19);
 }
 
-TEST(tensor, iterate)
+TEST(tensor, print)
 {
     std::vector<float> vec = makeVec();
     {
         mt::Tensor<float, 3> tensor(vec.data(), {5, 2, 2});
-        std::cout << tensor << std::endl;
+        std::stringstream ss;
+        ss << tensor;
+        ASSERT_EQ(ss.str(),
+                  "size: 5 2 2\nstride: 4 2 1\nDataType: f\n   0  1\n   2  3\n\n   4  5\n   6  7\n\n   8  9\n   10  "
+                  "11\n\n   12  13\n   14  15\n\n   16  17\n   18  19\n\n\n");
     }
     {
         mt::Tensor<float, 2> tensor(vec.data(), {5, 4});
-        std::cout << tensor << std::endl;
+        std::stringstream ss;
+        ss << tensor;
+        ASSERT_EQ(
+            ss.str(),
+            "size: 5 4\nstride: 4 1\nDataType: f\n 0 1 2 3\n 4 5 6 7\n 8 9 10 11\n 12 13 14 15\n 16 17 18 19\n\n");
     }
 }
 
@@ -68,5 +76,10 @@ TEST(tensor, type_erasure)
     mt::Tensor<void, 3> b = a;
 
     mt::Tensor<const float, 3> c = b;
-    std::cout << c << std::endl;
+    ASSERT_EQ(c.getShape(), a.getShape());
+    std::stringstream ss;
+    ss << c;
+    ASSERT_EQ(ss.str(),
+              "size: 5 2 2\nstride: 4 2 1\nDataType: f\n   0  1\n   2  3\n\n   4  5\n   6  7\n\n   8  9\n   10  11\n\n "
+              "  12  13\n   14  15\n\n   16  17\n   18  19\n\n\n");
 }

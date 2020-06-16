@@ -17,6 +17,19 @@ target_include_directories(minitensor
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
 )
 
+export(TARGETS minitensor
+    FILE minitensor-targets.cmake
+)
+
+install(TARGETS minitensor
+      EXPORT minitensor
+      DESTINATION lib
+) # ignored
+
+install(EXPORT minitensor FILE minitensor-config.cmake
+    DESTINATION share/minitensor
+)
+install(DIRECTORY include/minitensor DESTINATION include)
 
 if(BUILD_TESTS)
   ADD_SUBDIRECTORY (googletest)

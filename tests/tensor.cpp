@@ -52,6 +52,7 @@ TEST(tensor, print)
     std::vector<float> vec = makeVec();
     {
         mt::Tensor<float, 3> tensor(vec.data(), {5, 2, 2});
+        ASSERT_EQ(tensor.getShape(), mt::Shape<3>(5, 2, 2));
         std::stringstream ss;
         ss << tensor;
         ASSERT_EQ(ss.str(),

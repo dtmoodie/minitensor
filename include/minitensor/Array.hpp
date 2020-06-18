@@ -36,8 +36,8 @@ namespace mt
         {
         }
 
-        MT_XINLINE constexpr Array& operator=(const Array& other) = default;
-        MT_XINLINE constexpr Array& operator=(Array&& other) = default;
+        MT_XINLINE Array<T, N>& operator=(const Array<T, N>& other) = default;
+        MT_XINLINE Array<T, N>& operator=(Array<T, N>&& other) = default;
 
         MT_XINLINE T& operator[](int16_t idx) { return m_data[revIndex(idx, N)]; }
         MT_XINLINE const T& operator[](int16_t idx) const { return m_data[revIndex(idx, N)]; }

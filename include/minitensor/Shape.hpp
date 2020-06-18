@@ -14,7 +14,7 @@ namespace mt
         {
             // Assume last dim is densly packed
             m_stride[N - 1] = 1;
-            for (int32_t i = N - 2; i >= 0; --i)
+            for (int16_t i = N - 2; i >= 0; --i)
             {
                 const auto prev_stride = m_stride[i + 1];
                 const auto prev_shape = m_size[i + 1];
@@ -73,6 +73,54 @@ namespace mt
             }
             return true;
         }
+
+        size_t numElements() const
+        {
+            size_t size = m_size[0];
+            for (uint8_t i = 1; i < N; ++i)
+            {
+                size *= m_size[i];
+            }
+            return size;
+        }
+
+        bool isContinuous() const
+        {
+            if (m_stride[N - 1] == 1)
+            {
+                for (int16_t i = N - 2; i >= 0; --i)
+                {
+                    const auto prev_stride = m_stride[i + 1];
+                    const auto prev_shape = m_size[i + 1];
+                    if (m_stride[i] != prev_stride * prev_shape)
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+    };
+
+    template <>
+    class Shape<0>
+    {
+      public:
+        template <class... T>
+        size_t index(T&&... args) const
+        {
+            return 0;
+        }
+
+        MT_XINLINE uint32_t operator[](int16_t) const { return 0; }
+        MT_XINLINE uint32_t getStride(int16_t) const { return 1; }
+
+        void setShape(uint8_t, uint32_t) {}
+        void setStride(uint8_t, uint32_t) {}
+        bool operator==(const Shape&) const { return true; }
+
+        size_t numElements() const { return 1; }
     };
 
     template <uint8_t N>
@@ -95,6 +143,24 @@ namespace mt
         {
             out_shape.setShape(i, (NUMERATOR * shape[i]) / DENOMINATOR);
             out_shape.setStride(i, (NUMERATOR * shape.getStride(i)) / DENOMINATOR);
+        }
+        return out_shape;
+    }
+
+    template <uint8_t D>
+    Shape<D - 1> squeezeDim(uint8_t dim, const Shape<D>& shape)
+    {
+        Shape<D - 1> out_shape;
+
+        uint8_t j = 0;
+        for (uint8_t i = 0; i < D; ++i)
+        {
+            if (i != dim)
+            {
+                out_shape.setShape(j, shape[i]);
+                out_shape.setStride(j, shape.getStride(i));
+                ++j;
+            }
         }
         return out_shape;
     }

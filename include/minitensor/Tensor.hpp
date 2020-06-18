@@ -6,6 +6,7 @@
 #include "utilities.hpp"
 
 #include <cstddef>
+#include <vector>
 
 namespace mt
 {
@@ -23,15 +24,36 @@ namespace mt
         Tensor<const DTYPE, D - 1> operator[](uint32_t i) const
         {
             const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
-            const DTYPE* ptr = static_cast<const DERIVED*>(this)->getData();
+            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
             ptr += shape.getStride(0) * i;
             Shape<D - 1> out_shape = stripOuterDim(shape);
             return Tensor<const DTYPE, D - 1>(ptr, std::move(out_shape));
         }
+
         template <class... ARGS>
         const DTYPE& operator()(ARGS&&... args) const
         {
             return *static_cast<const DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
+        }
+
+        Tensor<const DTYPE, D - 1> squeeze(uint8_t dim) const
+        {
+            const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
+            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
+            assert(shape[dim] == 1);
+            Shape<D - 1> out_shape = squeezeDim(dim, shape);
+            return Tensor<const DTYPE, D - 1>(ptr, out_shape);
+        }
+
+        void copyTo(Tensor<DTYPE, D> dst) const
+        {
+            const Shape<D>& dst_shape = dst.getShape();
+            const Shape<D>& src_shape = static_cast<const DERIVED*>(this)->getShape();
+            assert(dst_shape[0] == src_shape[0]);
+            for (uint32_t i = 0; i < dst_shape[0]; ++i)
+            {
+                (*this)[i].copyTo(dst[i]);
+            }
         }
     };
 
@@ -45,6 +67,16 @@ namespace mt
         {
             return *static_cast<const DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
         }
+        void copyTo(Tensor<DTYPE, 1> dst) const
+        {
+            const Shape<1>& dst_shape = dst.getShape();
+            const Shape<1>& src_shape = static_cast<const DERIVED*>(this)->getShape();
+            assert(dst_shape[0] == src_shape[0]);
+            for (uint32_t i = 0; i < dst_shape[0]; ++i)
+            {
+                dst[i] = (*this)[i];
+            }
+        }
     };
 
     template <class DERIVED, class DTYPE, uint8_t D, class Enable = void>
@@ -54,15 +86,25 @@ namespace mt
         Tensor<DTYPE, D - 1> operator[](uint32_t i)
         {
             const Shape<D> shape = static_cast<DERIVED*>(this)->getShape();
-            DTYPE* ptr = static_cast<DERIVED*>(this)->getData();
+            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
             ptr += shape.getStride(0) * i;
             Shape<D - 1> out_shape = stripOuterDim(shape);
             return Tensor<DTYPE, D - 1>(ptr, std::move(out_shape));
         }
+
         template <class... ARGS>
         DTYPE& operator()(ARGS&&... args)
         {
             return *static_cast<DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
+        }
+
+        Tensor<DTYPE, D - 1> squeeze(uint8_t dim)
+        {
+            const Shape<D>& shape = static_cast<DERIVED*>(this)->getShape();
+            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
+            assert(shape[dim] == 1);
+            Shape<D - 1> out_shape = squeezeDim(dim, shape);
+            return Tensor<DTYPE, D - 1>(ptr, out_shape);
         }
     };
 
@@ -72,6 +114,7 @@ namespace mt
     {
       public:
         DTYPE& operator[](uint32_t i) { return *static_cast<DERIVED*>(this)->ptr(i); }
+
         template <class... ARGS>
         DTYPE& operator()(ARGS&&... args)
         {
@@ -95,7 +138,10 @@ namespace mt
     };
 
     template <class T, uint8_t D>
-    class Tensor<T, D, typename std::enable_if<!std::is_same<typename std::remove_const<T>::type, void>::value>::type>
+    class Tensor<
+        T,
+        D,
+        typename std::enable_if<!std::is_same<typename std::remove_const<T>::type, void>::value && D != 0>::type>
         : public TensorIndexing<Tensor<T, D>, T, D>
     {
         T* m_ptr;
@@ -103,9 +149,12 @@ namespace mt
 
       public:
         Tensor(T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
-        Tensor(Tensor<T, D>& other) : m_ptr(other.getData()), m_shape(other.getShape()) {}
+        Tensor(Tensor<T, D>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
         Tensor(const Tensor& other) = default;
         Tensor(Tensor&& other) = default;
+
+        Tensor& operator=(const Tensor&) = default;
+        Tensor& operator=(Tensor&&) = default;
 
         template <class... ARGS>
         T* ptr(ARGS&&... args)
@@ -122,8 +171,8 @@ namespace mt
         }
 
         MT_XINLINE Shape<D> getShape() const { return m_shape; }
-        MT_XINLINE const T* getData() const { return m_ptr; }
-        MT_XINLINE T* getData() { return m_ptr; }
+        MT_XINLINE const T* data() const { return m_ptr; }
+        MT_XINLINE T* data() { return m_ptr; }
     };
     template <class T, uint8_t D>
     class Tensor<T, D, typename std::enable_if<std::is_same<typename std::remove_const<T>::type, void>::value>::type>
@@ -136,14 +185,14 @@ namespace mt
         Tensor(T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
 
         template <class U>
-        Tensor(Tensor<U, D>& other) : m_ptr(static_cast<void*>(other.getData()))
+        Tensor(Tensor<U, D>& other) : m_ptr(static_cast<void*>(other.data()))
         {
             const Shape<D>& other_shape = other.getShape();
             m_shape = copyScaled<sizeof(U), 1>(other_shape);
         }
 
         template <class U>
-        Tensor(Tensor<U, D>&& other) : m_ptr(static_cast<T*>(other.getData()))
+        Tensor(Tensor<U, D>&& other) : m_ptr(static_cast<T*>(other.data()))
         {
             const Shape<D>& other_shape = other.getShape();
             m_shape = copyScaled<sizeof(U), 1>(other_shape);
@@ -152,6 +201,9 @@ namespace mt
         Tensor(Tensor& other) = default;
 
         Tensor(Tensor&& other) = default;
+
+        Tensor& operator=(const Tensor&) = default;
+        Tensor& operator=(Tensor&&) = default;
 
         template <class... ARGS>
         const T* ptr(ARGS&&... args) const
@@ -168,8 +220,8 @@ namespace mt
         }
 
         MT_XINLINE const Shape<D>& getShape() const { return m_shape; }
-        MT_XINLINE const T* getData() const { return m_ptr; }
-        MT_XINLINE T* getData() { return m_ptr; }
+        MT_XINLINE const T* data() const { return m_ptr; }
+        MT_XINLINE T* data() { return m_ptr; }
 
         template <class U>
         operator Tensor<U, D>()
@@ -177,6 +229,34 @@ namespace mt
             Shape<D> out_shape = copyScaled<1, sizeof(U)>(m_shape);
             return Tensor<U, D>(static_cast<U*>(m_ptr), std::move(out_shape));
         }
+    };
+
+    template <class T>
+    class Tensor<T, 0, void>
+    {
+        T* m_ptr;
+
+      public:
+        Tensor(T* ptr = nullptr, Shape<0> = Shape<0>()) : m_ptr(ptr) {}
+
+        template <class... ARGS>
+        const T* ptr(ARGS&&... args) const
+        {
+            return m_ptr;
+        }
+
+        template <class... ARGS>
+        T* ptr(ARGS&&... args)
+        {
+            return m_ptr;
+        }
+
+        void copyTo(Tensor<typename std::remove_const<T>::type, 0, void> dst) const { *dst.data() = *m_ptr; }
+        void copyTo(typename std::remove_const<T>::type& dst) const { dst = *m_ptr; }
+
+        MT_XINLINE Shape<0> getShape() const { return Shape<0>(); }
+        MT_XINLINE const T* data() const { return m_ptr; }
+        MT_XINLINE T* data() { return m_ptr; }
     };
 
     template <class T, uint8_t D>
@@ -225,7 +305,7 @@ namespace mt
         const auto& shape = tensor.getShape();
         Shape<D - 1> out_shape = stripOuterDim(shape);
         const auto outer_stride = shape.getStride(0);
-        auto ptr = tensor.getData();
+        auto ptr = tensor.data();
         return TensorIterator<const T, D - 1>(ptr, outer_stride, out_shape);
     }
 
@@ -235,7 +315,7 @@ namespace mt
         const auto& shape = tensor.getShape();
         Shape<D - 1> out_shape = stripOuterDim(shape);
         const auto outer_stride = shape.getStride(0);
-        auto ptr = tensor.getData();
+        auto ptr = tensor.data();
         return TensorIterator<T, D - 1>(ptr, outer_stride, out_shape);
     }
 
@@ -246,7 +326,7 @@ namespace mt
         Shape<D - 1> out_shape = stripOuterDim(shape);
         const auto outer_stride = shape.getStride(0);
         const auto step = outer_stride * shape[0];
-        auto ptr = tensor.getData();
+        auto ptr = tensor.data();
         ptr += step;
         return TensorIterator<const T, D - 1>(ptr, outer_stride, out_shape);
     }
@@ -258,7 +338,7 @@ namespace mt
         Shape<D - 1> out_shape = stripOuterDim(shape);
         const auto outer_stride = shape.getStride(0);
         const auto step = outer_stride * shape[0];
-        auto ptr = tensor.getData();
+        auto ptr = tensor.data();
         return TensorIterator<T, D - 1>(ptr + step, outer_stride, out_shape);
     }
 
@@ -282,6 +362,30 @@ namespace mt
         {
             os << "\n";
         }
+    }
+
+    template <class T>
+    Tensor<T, 0> tensorWrap(T& data)
+    {
+        return Tensor<T, 0>(&data);
+    }
+
+    template <class T>
+    Tensor<const T, 0> tensorWrap(const T& data)
+    {
+        return Tensor<const T, 0>(&data);
+    }
+
+    template <class T>
+    Tensor<const T, 1> tensorWrap(const std::vector<T>& data)
+    {
+        return Tensor<const T, 1>(data.data(), data.size());
+    }
+
+    template <class T>
+    Tensor<T, 1> tensorWrap(std::vector<T>& data)
+    {
+        return Tensor<T, 1>(data.data(), data.size());
     }
 
 } // namespace mt

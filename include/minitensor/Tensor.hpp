@@ -5,11 +5,14 @@
 #include "Shape.hpp"
 #include "utilities.hpp"
 
+#include <assert.h>
 #include <cstddef>
 #include <vector>
 
 namespace mt
 {
+
+    static constexpr bool greater(uint8_t lhs, uint8_t rhs) { return lhs > rhs; }
     template <class T, uint8_t D>
     class TensorIterator;
 
@@ -55,6 +58,18 @@ namespace mt
                 (*this)[i].copyTo(dst[i]);
             }
         }
+
+        // void const or non const based on what T is
+        template <uint8_t N>
+        operator Tensor<const void, N, typename std::enable_if<greater(N, D)>::type>() const
+        {
+            Shape<N> out_shape;
+            const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
+            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
+            // TODO more than just unsqueeze
+            unsqueeze(shape, out_shape, N - 1);
+            return Tensor<const void, N>(ptr, out_shape);
+        }
     };
 
     template <class DERIVED, class DTYPE>
@@ -76,6 +91,17 @@ namespace mt
             {
                 dst[i] = (*this)[i];
             }
+        }
+
+        template <uint8_t N>
+        operator Tensor<const void, N, typename std::enable_if<greater(N, 1)>::type>() const
+        {
+            Shape<N> out_shape;
+            const Shape<1>& shape = static_cast<const DERIVED*>(this)->getShape();
+            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
+            // TODO more than just unsqueeze
+            unsqueeze(shape, out_shape, N - 1);
+            return Tensor<const void, N>(ptr, out_shape);
         }
     };
 
@@ -106,6 +132,18 @@ namespace mt
             Shape<D - 1> out_shape = squeezeDim(dim, shape);
             return Tensor<DTYPE, D - 1>(ptr, out_shape);
         }
+
+        // void const or non const based on what T is
+        template <uint8_t N>
+        operator Tensor<void, N, typename std::enable_if<greater(N, D)>::type>()
+        {
+            Shape<N> out_shape;
+            const Shape<D>& shape = static_cast<DERIVED*>(this)->getShape();
+            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
+            // TODO more than just unsqueeze
+            unsqueeze(shape, out_shape, N - 1);
+            return Tensor<void, N>(ptr, out_shape);
+        }
     };
 
     template <class DERIVED, class DTYPE>
@@ -119,6 +157,17 @@ namespace mt
         DTYPE& operator()(ARGS&&... args)
         {
             return *static_cast<DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
+        }
+
+        template <uint8_t N>
+        operator Tensor<void, N, typename std::enable_if<greater(N, 1)>::type>()
+        {
+            Shape<N> out_shape;
+            const Shape<1>& shape = static_cast<DERIVED*>(this)->getShape();
+            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
+            // TODO more than just unsqueeze
+            unsqueeze(shape, out_shape, N - 1);
+            return Tensor<void, N>(ptr, out_shape);
         }
     };
 
@@ -138,10 +187,10 @@ namespace mt
     };
 
     template <class T, uint8_t D>
-    class Tensor<
-        T,
-        D,
-        typename std::enable_if<!std::is_same<typename std::remove_const<T>::type, void>::value && D != 0>::type>
+    class Tensor<T,
+                 D,
+                 typename std::enable_if<!std::is_same<typename std::remove_const<T>::type, void>::value &&
+                                         D != 0>::type> // is not void and is not 0 dimensional
         : public TensorIndexing<Tensor<T, D>, T, D>
     {
         T* m_ptr;
@@ -170,10 +219,17 @@ namespace mt
             return &m_ptr[index];
         }
 
+        template <uint8_t N>
+        operator Tensor<T, N, typename std::enable_if<greater(N, D)>::type>()
+        {
+        }
+
         MT_XINLINE Shape<D> getShape() const { return m_shape; }
         MT_XINLINE const T* data() const { return m_ptr; }
         MT_XINLINE T* data() { return m_ptr; }
     };
+
+    // void specialization
     template <class T, uint8_t D>
     class Tensor<T, D, typename std::enable_if<std::is_same<typename std::remove_const<T>::type, void>::value>::type>
         : public TensorIndexing<Tensor<T, D>, T, D>
@@ -229,6 +285,11 @@ namespace mt
             Shape<D> out_shape = copyScaled<1, sizeof(U)>(m_shape);
             return Tensor<U, D>(static_cast<U*>(m_ptr), std::move(out_shape));
         }
+
+        template <uint8_t N>
+        operator Tensor<void, N, typename std::enable_if<greater(N, D)>::type>()
+        {
+        }
     };
 
     template <class T>
@@ -251,12 +312,26 @@ namespace mt
             return m_ptr;
         }
 
+        T& operator[](size_t idx) { return *data; }
+
+        const T& operator[](size_t idx) const { return *data; }
+
         void copyTo(Tensor<typename std::remove_const<T>::type, 0, void> dst) const { *dst.data() = *m_ptr; }
         void copyTo(typename std::remove_const<T>::type& dst) const { dst = *m_ptr; }
 
         MT_XINLINE Shape<0> getShape() const { return Shape<0>(); }
         MT_XINLINE const T* data() const { return m_ptr; }
         MT_XINLINE T* data() { return m_ptr; }
+
+        template <uint8_t N>
+        operator Tensor<T, N, typename std::enable_if<greater(N, 0)>::type>()
+        {
+        }
+
+        template <uint8_t N>
+        operator Tensor<void, N, typename std::enable_if<greater(N, 0)>::type>()
+        {
+        }
     };
 
     template <class T, uint8_t D>

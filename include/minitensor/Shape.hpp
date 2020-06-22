@@ -10,18 +10,6 @@ namespace mt
         Array<uint32_t, N> m_size;
         Array<int32_t, N> m_stride;
 
-        void calculateStride()
-        {
-            // Assume last dim is densly packed
-            m_stride[N - 1] = 1;
-            for (int16_t i = N - 2; i >= 0; --i)
-            {
-                const auto prev_stride = m_stride[i + 1];
-                const auto prev_shape = m_size[i + 1];
-                m_stride[i] = prev_stride * prev_shape;
-            }
-        }
-
         template <uint8_t D, class T>
         size_t indexHelper(size_t out, T&& arg) const
         {
@@ -58,10 +46,13 @@ namespace mt
         }
 
         MT_XINLINE uint32_t operator[](int16_t idx) const { return m_size[idx]; }
+
         MT_XINLINE uint32_t getStride(int16_t idx) const { return m_stride[idx]; }
 
         void setShape(uint8_t dim, uint32_t size) { m_size[dim] = size; }
+
         void setStride(uint8_t dim, uint32_t stride) { m_stride[dim] = stride; }
+
         bool operator==(const Shape& other) const
         {
             for (uint8_t i = 0; i < N; ++i)
@@ -72,6 +63,18 @@ namespace mt
                 }
             }
             return true;
+        }
+
+        void calculateStride()
+        {
+            // Assume last dim is densly packed
+            m_stride[N - 1] = 1;
+            for (int16_t i = N - 2; i >= 0; --i)
+            {
+                const auto prev_stride = m_stride[i + 1];
+                const auto prev_shape = m_size[i + 1];
+                m_stride[i] = prev_stride * prev_shape;
+            }
         }
 
         size_t numElements() const
@@ -92,7 +95,7 @@ namespace mt
                 {
                     const auto prev_stride = m_stride[i + 1];
                     const auto prev_shape = m_size[i + 1];
-                    if (m_stride[i] != prev_stride * prev_shape)
+                    if (m_stride[i] != static_cast<int32_t>(prev_stride * prev_shape))
                     {
                         return false;
                     }
@@ -101,6 +104,8 @@ namespace mt
             }
             return false;
         }
+
+        uint8_t size() const { return N; }
     };
 
     template <>
@@ -163,6 +168,24 @@ namespace mt
             }
         }
         return out_shape;
+    }
+
+    template <uint8_t N>
+    void unsqueeze(const Shape<N>& in, Shape<N + 1>& out, uint8_t dim)
+    {
+        // TODO copy stride
+        uint8_t out_dim = 0;
+        for (uint8_t i = 0; i < N; ++i)
+        {
+            out.setShape(out_dim, in[i]);
+            if (i == dim)
+            {
+                out.setShape(out_dim + 1, 1);
+                ++out_dim;
+            }
+            ++out_dim;
+        }
+        out.calculateStride();
     }
 } // namespace mt
 

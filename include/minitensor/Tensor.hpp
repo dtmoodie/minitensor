@@ -312,9 +312,9 @@ namespace mt
             return m_ptr;
         }
 
-        T& operator[](size_t idx) { return *data; }
+        T& operator[](size_t idx) { return *m_ptr; }
 
-        const T& operator[](size_t idx) const { return *data; }
+        const T& operator[](size_t idx) const { return *m_ptr; }
 
         void copyTo(Tensor<typename std::remove_const<T>::type, 0, void> dst) const { *dst.data() = *m_ptr; }
         void copyTo(typename std::remove_const<T>::type& dst) const { dst = *m_ptr; }

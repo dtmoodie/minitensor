@@ -1,3 +1,3 @@
 [submodule "googletest"]
 	path = googletest
-	url = /mnt/usb/git/googletest
+	url = ../googletest

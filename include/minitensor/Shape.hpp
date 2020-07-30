@@ -39,10 +39,23 @@ namespace mt
         }
 
         template <class... T>
-        size_t index(T&&... args) const
+        auto index(T&&... args) const -> typename std::enable_if<sizeof...(args) != 1, size_t>::type
         {
             size_t out = 0;
             return indexHelper<0>(out, std::forward<T>(args)...);
+        }
+
+        size_t index(size_t idx) const
+        {
+            size_t out = 0;
+            for (uint8_t i = 0; i < N - 1; ++i)
+            {
+                const size_t this_idx = idx / m_size[i + 1];
+                idx = idx % m_size[i + 1];
+                out += m_stride[i] * this_idx;
+            }
+            out += idx;
+            return out;
         }
 
         MT_XINLINE uint32_t operator[](int16_t idx) const { return m_size[idx]; }

@@ -205,6 +205,19 @@ namespace mt
         Tensor& operator=(const Tensor&) = default;
         Tensor& operator=(Tensor&&) = default;
 
+        Tensor& operator=(const std::vector<T>& data)
+        {
+            assert(data.size() == m_shape.numElements());
+            const size_t size = m_shape.numElements();
+            for (size_t i = 0; i < size; ++i)
+            {
+                // This accounts for reverse indexing, etc
+                const size_t idx = m_shape.index(i);
+                m_ptr[idx] = data[i];
+            }
+            return *this;
+        }
+
         template <class... ARGS>
         T* ptr(ARGS&&... args)
         {

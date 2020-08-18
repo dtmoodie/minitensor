@@ -24,6 +24,9 @@ namespace mt
     class ConstTensorIndexing
     {
       public:
+        static constexpr const uint8_t DIM = D;
+        using DType = DTYPE;
+
         Tensor<const DTYPE, D - 1> operator[](uint32_t i) const
         {
             const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
@@ -76,6 +79,8 @@ namespace mt
     class ConstTensorIndexing<DERIVED, DTYPE, 1>
     {
       public:
+        static constexpr const uint8_t DIM = 1;
+        using DType = DTYPE;
         const DTYPE& operator[](uint32_t i) const { return *static_cast<const DERIVED*>(this)->ptr(i); }
         template <class... ARGS>
         const DTYPE& operator()(ARGS&&... args) const
@@ -305,12 +310,15 @@ namespace mt
         }
     };
 
+    // scalar value specialization
     template <class T>
     class Tensor<T, 0, void>
     {
         T* m_ptr;
 
       public:
+        static constexpr const uint8_t DIM = 0;
+        using DType = T;
         Tensor(T* ptr = nullptr, Shape<0> = Shape<0>()) : m_ptr(ptr) {}
 
         template <class... ARGS>
@@ -347,6 +355,9 @@ namespace mt
         }
     };
 
+    ///////////////////////////////////////////////////////////////////////////
+    //            TensorIterator
+    ///////////////////////////////////////////////////////////////////////////
     template <class T, uint8_t D>
     class TensorIterator
     {
@@ -452,28 +463,46 @@ namespace mt
         }
     }
 
-    template <class T>
-    Tensor<T, 0> tensorWrap(T& data)
+    template <class T, class E = void, uint8_t P = 5>
+    struct TensorWrap : TensorWrap<T, E, P - 1>
     {
-        return Tensor<T, 0>(&data);
+    };
+
+    template <class T>
+    struct TensorWrap<T, void, 0>
+    {
+        static Tensor<T, 0> wrap(T& data) { return Tensor<T, 0>(&data); }
+        static Tensor<const T, 0> wrap(const T& data) { return Tensor<const T, 0>(&data); }
+    };
+
+    template <class T>
+    struct TensorWrap<T, typename std::enable_if<std::is_const<T>::value>::type, 1>
+    {
+        static Tensor<T, 0> wrap(T& data) { return Tensor<T, 0>(&data); }
+    };
+
+    template <class T>
+    struct TensorWrap<std::vector<T>, void, 2>
+    {
+
+        static Tensor<const T, 1> wrap(const std::vector<T>& data)
+        {
+            return Tensor<const T, 1>(data.data(), data.size());
+        }
+
+        static Tensor<T, 1> wrap(std::vector<T>& data) { return Tensor<T, 1>(data.data(), data.size()); }
+    };
+
+    template <class T>
+    auto tensorWrap(const T& data) -> decltype(TensorWrap<T>::wrap(data))
+    {
+        return TensorWrap<T>::wrap(data);
     }
 
     template <class T>
-    Tensor<const T, 0> tensorWrap(const T& data)
+    auto tensorWrap(T& data) -> decltype(TensorWrap<T>::wrap(data))
     {
-        return Tensor<const T, 0>(&data);
-    }
-
-    template <class T>
-    Tensor<const T, 1> tensorWrap(const std::vector<T>& data)
-    {
-        return Tensor<const T, 1>(data.data(), data.size());
-    }
-
-    template <class T>
-    Tensor<T, 1> tensorWrap(std::vector<T>& data)
-    {
-        return Tensor<T, 1>(data.data(), data.size());
+        return TensorWrap<T>::wrap(data);
     }
 
 } // namespace mt

@@ -118,7 +118,7 @@ namespace mt
             return false;
         }
 
-        uint8_t size() const { return N; }
+        uint8_t numDimensions() const { return N; }
     };
 
     template <>

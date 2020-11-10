@@ -338,7 +338,12 @@ namespace mt
         const T& operator[](size_t idx) const { return *m_ptr; }
 
         void copyTo(Tensor<typename std::remove_const<T>::type, 0, void> dst) const { *dst.data() = *m_ptr; }
-        void copyTo(typename std::remove_const<T>::type& dst) const { dst = *m_ptr; }
+
+        template <class U>
+        void copyTo(U&& dst) const
+        {
+            dst = *m_ptr;
+        }
 
         MT_XINLINE Shape<0> getShape() const { return Shape<0>(); }
         MT_XINLINE const T* data() const { return m_ptr; }

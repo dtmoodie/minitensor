@@ -7,6 +7,7 @@
 
 #include <assert.h>
 #include <cstddef>
+#include <typeinfo>
 #include <vector>
 
 namespace mt

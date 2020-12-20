@@ -25,9 +25,21 @@ namespace mt
         }
 
       public:
-        Shape(const Shape& other) = default;
-        Shape(Shape& other) = default;
-        Shape(Shape&& other) = default;
+        Shape(const Shape& other):
+            m_size(other.m_size), m_stride(other.m_stride)
+        {
+
+        }
+        Shape(Shape& other):
+            m_size(other.m_size), m_stride(other.m_stride)
+        {
+
+        }
+        Shape(Shape&& other):
+            m_size(other.m_size), m_stride(other.m_stride)
+        {
+
+        }
 
         Shape& operator=(const Shape& other) = default;
         Shape& operator=(Shape&& other) = default;

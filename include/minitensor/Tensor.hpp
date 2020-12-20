@@ -375,11 +375,11 @@ namespace mt
     class TensorIterator
     {
         T* m_ptr;
-        ssize_t m_stride;
+        int64_t m_stride;
         Shape<D> m_shape;
 
       public:
-        TensorIterator(T* ptr, ssize_t stride, Shape<D> shape) : m_ptr(ptr), m_stride(stride), m_shape(shape) {}
+        TensorIterator(T* ptr, int64_t stride, Shape<D> shape) : m_ptr(ptr), m_stride(stride), m_shape(shape) {}
 
         Tensor<T, D> operator*() const { return Tensor<T, D>(m_ptr, m_shape); }
 
@@ -398,7 +398,7 @@ namespace mt
         size_t m_stride;
 
       public:
-        TensorIterator(T* ptr, ssize_t stride, Shape<0>) : m_ptr(ptr), m_stride(stride) {}
+        TensorIterator(T* ptr, int64_t stride, Shape<0>) : m_ptr(ptr), m_stride(stride) {}
 
         T& operator*() const { return *m_ptr; }
 

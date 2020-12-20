@@ -5,8 +5,8 @@ project(minitensor)
 
 option(BUILD_TESTS ON "Build tests")
 
-set(CMAKE_CXX_VERSION 11)
-set(CMAKE_CXX_VERSION_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(minitensor
   INTERFACE

@@ -205,8 +205,8 @@ namespace mt
       public:
         Tensor(T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
         Tensor(Tensor<T, D>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
-        Tensor(const Tensor& other) = default;
-        Tensor(Tensor&& other) = default;
+        Tensor(const Tensor& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+        Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
 
         Tensor& operator=(const Tensor&) = default;
         Tensor& operator=(Tensor&&) = default;
@@ -273,9 +273,16 @@ namespace mt
             m_shape = copyScaled<sizeof(U), 1>(other_shape);
         }
 
-        Tensor(Tensor& other) = default;
+        Tensor(Tensor& other) : m_ptr(other.data())
+        {
+            const Shape<D>& other_shape = other.getShape();
+            m_shape = other.m_shape;
+        }
 
-        Tensor(Tensor&& other) = default;
+        Tensor(Tensor&& other) : m_ptr(other.data())
+        {
+            m_shape = other.m_shape;
+        }
 
         Tensor& operator=(const Tensor&) = default;
         Tensor& operator=(Tensor&&) = default;

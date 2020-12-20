@@ -27,9 +27,27 @@ namespace mt
         T m_data[N];
 
       public:
-        MT_XINLINE constexpr Array(const Array& other) = default;
-        MT_XINLINE constexpr Array(Array& other) = default;
-        MT_XINLINE constexpr Array(Array&& other) = default;
+        MT_XINLINE Array(const Array& other)
+        {
+            for(uint8_t i = 0; i < N; ++i)
+            {
+                m_data[i] = other.m_data[i];
+            }
+        }
+        MT_XINLINE Array(Array& other)
+        {
+            for(uint8_t i = 0; i < N; ++i)
+            {
+                m_data[i] = other.m_data[i];
+            }
+        }
+        MT_XINLINE Array(Array&& other)
+        {
+            for(uint8_t i = 0; i < N; ++i)
+            {
+                m_data[i] = other.m_data[i];
+            }
+        }
 
         template <class... ARGS>
         MT_XINLINE constexpr Array(ARGS&&... args) : m_data{static_cast<T>(std::forward<ARGS>(args))...}

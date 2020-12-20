@@ -32,6 +32,8 @@ install(EXPORT minitensor FILE minitensor-config.cmake
 install(DIRECTORY include/minitensor DESTINATION include)
 
 if(BUILD_TESTS)
+  set(CMAKE_CXX_STANDARD 11)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
   ADD_SUBDIRECTORY (googletest)
   enable_testing()
   set(GTEST_INCLUDE googletest/googletest/include)

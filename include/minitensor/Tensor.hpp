@@ -91,8 +91,7 @@ namespace mt
         void copyTo(Tensor<DTYPE, 1> dst) const
         {
             const Shape<1>& dst_shape = dst.getShape();
-            const Shape<1>& src_shape = static_cast<const DERIVED*>(this)->getShape();
-            assert(dst_shape[0] == src_shape[0]);
+            assert(dst_shape[0] == static_cast<const DERIVED*>(this)->getShape()[0]);
             for (uint32_t i = 0; i < dst_shape[0]; ++i)
             {
                 dst[i] = (*this)[i];

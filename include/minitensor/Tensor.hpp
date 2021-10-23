@@ -5,6 +5,8 @@
 #include "Shape.hpp"
 #include "utilities.hpp"
 
+#include <ct/types/TArrayView.hpp>
+
 #include <assert.h>
 #include <cstddef>
 #include <typeinfo>
@@ -195,7 +197,7 @@ namespace mt
     class Tensor<T,
                  D,
                  typename std::enable_if<!std::is_same<typename std::remove_const<T>::type, void>::value &&
-                                         D != 0>::type> // is not void and is not 0 dimensional
+                                         greater(D, 1)>::type> // is not void and is not 0 dimensional
         : public TensorIndexing<Tensor<T, D>, T, D>
     {
         T* m_ptr;
@@ -247,6 +249,68 @@ namespace mt
         MT_XINLINE T* data() { return m_ptr; }
     };
 
+    template <class T>
+    class Tensor<T,
+                 1,
+                 typename std::enable_if<!std::is_same<typename std::remove_const<T>::type,
+                                                       void>::value>::type> // is not void
+        : public TensorIndexing<Tensor<T, 1>, T, 1>
+    {
+        T* m_ptr;
+        Shape<1> m_shape;
+
+      public:
+        Tensor(T* ptr = nullptr, Shape<1> shape = Shape<1>()) : m_ptr(ptr), m_shape(shape) {}
+        Tensor(Tensor<T, 1>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+        Tensor(const Tensor& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+        Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor& operator=(const Tensor&) = default;
+        Tensor& operator=(Tensor&&) = default;
+
+        Tensor& operator=(const std::vector<T>& data)
+        {
+            assert(data.size() == m_shape.numElements());
+            const size_t size = m_shape.numElements();
+            for (size_t i = 0; i < size; ++i)
+            {
+                // This accounts for reverse indexing, etc
+                const size_t idx = m_shape.index(i);
+                m_ptr[idx] = data[i];
+            }
+            return *this;
+        }
+
+        template <class... ARGS>
+        T* ptr(ARGS&&... args)
+        {
+            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            return &m_ptr[index];
+        }
+
+        template <class... ARGS>
+        const T* ptr(ARGS&&... args) const
+        {
+            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            return &m_ptr[index];
+        }
+
+        template <uint8_t N>
+        operator Tensor<T, N, typename std::enable_if<greater(N, 1)>::type>()
+        {
+        }
+
+        operator ct::TArrayView<T>()
+        {
+            assert(m_shape.isContinuous());
+            return ct::TArrayView<T>(m_ptr, m_shape[0]);
+        }
+
+        MT_XINLINE Shape<1> getShape() const { return m_shape; }
+        MT_XINLINE const T* data() const { return m_ptr; }
+        MT_XINLINE T* data() { return m_ptr; }
+    };
+
     // void specialization
     template <class T, uint8_t D>
     class Tensor<T, D, typename std::enable_if<std::is_same<typename std::remove_const<T>::type, void>::value>::type>
@@ -278,10 +342,7 @@ namespace mt
             m_shape = other.m_shape;
         }
 
-        Tensor(Tensor&& other) : m_ptr(other.data())
-        {
-            m_shape = other.m_shape;
-        }
+        Tensor(Tensor&& other) : m_ptr(other.data()) { m_shape = other.m_shape; }
 
         Tensor& operator=(const Tensor&) = default;
         Tensor& operator=(Tensor&&) = default;

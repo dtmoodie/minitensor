@@ -44,6 +44,69 @@ namespace mt
         Shape& operator=(const Shape& other) = default;
         Shape& operator=(Shape&& other) = default;
 
+        template<uint8_t N1>
+        Shape(Shape<N1>& other)
+        {
+            static_assert(N1 < N,"");
+            const uint8_t padded = N - N1;
+            int16_t i;
+            for(i = 0; i < padded; ++i)
+            {
+                m_size[i] = 1;
+            }
+            for(; i < N; ++i)
+            {
+                m_size[i] = other[i - padded];
+                m_stride[i] = other.getStride(i - padded);
+            }
+            for(i = padded - 1; i >= 0; --i)
+            {
+                m_stride[i] = m_size[i + 1] * m_stride[i + 1];
+            }
+        }
+
+        template<uint8_t N1>
+        Shape(const Shape<N1>& other)
+        {
+            static_assert(N1 < N,"");
+            const uint8_t padded = N - N1;
+            int16_t i;
+            for(i = 0; i < padded; ++i)
+            {
+                m_size[i] = 1;
+            }
+            for(; i < N; ++i)
+            {
+                m_size[i] = other[i - padded];
+                m_stride[i] = other.getStride(i - padded);
+            }
+            for(i = padded - 1; i >= 0; --i)
+            {
+                m_stride[i] = m_size[i + 1] * m_stride[i + 1];
+            }
+        }
+
+        template<uint8_t N1>
+        Shape(Shape<N1>&& other)
+        {
+            static_assert(N1 < N,"");
+            const uint8_t padded = N - N1;
+            int16_t i;
+            for(i = 0; i < padded; ++i)
+            {
+                m_size[i] = 1;
+            }
+            for(; i < N; ++i)
+            {
+                m_size[i] = other[i - padded];
+                m_stride[i] = other.getStride(i - padded);
+            }
+            for(i = padded - 1; i >= 0; --i)
+            {
+                m_stride[i] = m_size[i + 1] * m_stride[i + 1];
+            }
+        }
+
         template <class... T>
         Shape(T&&... args) : m_size(std::forward<T>(args)...)
         {
@@ -59,6 +122,24 @@ namespace mt
 
         size_t index(size_t idx) const
         {
+            size_t out = m_stride[0] * idx;
+            return out;
+        }
+
+        /**
+         * @brief linearIndex calculates the linear index of the idx'th element as if this was a c-style array
+         *        IE for a 4x4 matrix
+         *        | 0,  1,  2, 3
+         *        | 4,  5,  6, 7
+         *        | 8,  9, 10, 11
+         *        |12, 13, 14, 15
+         *        The 5th element has a value of 5 and 2d index of 1,1.  Linear index will return the offset from the beginning of the data
+         *        block to where the element is.  This important distinction is due to the fact that reversed
+         * @param idx
+         * @return
+         */
+        size_t linearIndex(size_t idx) const
+        {
             size_t out = 0;
             for (uint8_t i = 0; i < N - 1; ++i)
             {
@@ -68,6 +149,17 @@ namespace mt
             }
             out += idx;
             return out;
+        }
+
+        Shape<N - 1> minorShape() const
+        {
+            Shape<N - 1> output;
+            for(uint8_t i = 1; i < N; ++i)
+            {
+                output.setStride(i - 1, m_stride[i]);
+                output.setShape(i - 1, m_size[i]);
+            }
+            return output;
         }
 
         MT_XINLINE uint32_t operator[](int16_t idx) const { return m_size[idx]; }

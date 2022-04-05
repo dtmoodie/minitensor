@@ -8,14 +8,26 @@ option(BUILD_TESTS ON "Build tests")
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(NOT TARGET ct)
+    find_package(ct QUIET)
+endif()
+
+file(GLOB_RECURSE hdr "include/*.hpp")
 add_library(minitensor
   INTERFACE
+  ${hdr}
 )
 
 target_include_directories(minitensor
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
 )
+
+target_link_libraries(minitensor
+    INTERFACE
+        ct
+)
+
 
 export(TARGETS minitensor
     FILE minitensor-targets.cmake

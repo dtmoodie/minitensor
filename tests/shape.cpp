@@ -37,8 +37,24 @@ TEST(shape, linear_index)
 {
     mt::Shape<2> shape(5, 4);
 
-    ASSERT_EQ(shape.index(1), 1);
+    ASSERT_EQ(shape.index(1), 4);
     ASSERT_EQ(shape.index(1, 1), 5);
-    ASSERT_EQ(shape.index(5), 5);
-    ASSERT_EQ(shape.index(6), 6);
+    ASSERT_EQ(shape.index(5), 5*4);
+
+    ASSERT_EQ(shape.linearIndex(5), 5);
+    ASSERT_EQ(shape.linearIndex(6), 6);
+}
+
+TEST(shape, unsqueezing)
+{
+    mt::Shape<2> shape(5,4);
+    mt::Shape<3> shape3 = shape;
+    ASSERT_EQ(shape3[0], 1);
+    ASSERT_EQ(shape3[1], 5);
+    ASSERT_EQ(shape3[2], 4);
+
+    ASSERT_EQ(shape3.getStride(2), shape.getStride(1));
+    ASSERT_EQ(shape3.getStride(1), shape.getStride(0));
+    ASSERT_EQ(shape3.getStride(0), 5*4);
+
 }

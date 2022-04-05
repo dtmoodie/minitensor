@@ -6,6 +6,7 @@
 #include "utilities.hpp"
 
 #include <ct/types/TArrayView.hpp>
+#include <ct/reflect_traits.hpp>
 
 #include <assert.h>
 #include <cstddef>
@@ -14,263 +15,294 @@
 
 namespace mt
 {
+    template<class T>
+    struct SafeSizeOf
+    {
+        static constexpr const size_t value = sizeof(T);
+    };
 
-    static constexpr bool greater(uint8_t lhs, uint8_t rhs) { return lhs > rhs; }
-    template <class T, uint8_t D>
-    class TensorIterator;
+    template<>
+    struct SafeSizeOf<void>
+    {
+        // 1 byte
+        static constexpr const size_t value = 1;
+    };
 
-    template <class T, uint8_t D, class ENABLE = void>
+    template<>
+    struct SafeSizeOf<const void>
+    {
+        // 1 byte
+        static constexpr const size_t value = 1;
+    };
+
+    template <class T, uint8_t D, template<uint8_t> class LAYOUT = Shape>
     class Tensor;
 
-    // This class handles creating the operator []
-    template <class DERIVED, class DTYPE, uint8_t D>
-    class ConstTensorIndexing
+    template<class T, class U>
+    struct IsSame;
+
+    // Helper function for checking if all types in a typedef are the same as the query T
+    template<class T, class ... Us>
+    struct IsSame<T, ct::VariadicTypedef<Us...>>
     {
+        template<class U>
+        using Checker = std::is_same<T, U>;
+        static constexpr const bool value = ct::VariadicTypedef<Us...>::template all<Checker>();
+    };
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    ///  Tensor class
+    ////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * @brief The Tensor class
+     */
+    template <class T, uint8_t D, template<uint8_t> class LAYOUT>
+    class Tensor
+    {
+        T* m_ptr;
+        LAYOUT<D> m_shape;
+
+        /*template<class U>
+        using IsSame = std::is_same<T, U>;*/
+
       public:
         static constexpr const uint8_t DIM = D;
-        using DType = DTYPE;
+        using DType = T;
 
-        Tensor<const DTYPE, D - 1> operator[](uint32_t i) const
+        Tensor(T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
+
+        Tensor(Tensor<T, D>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        template<uint8_t D1>
+        Tensor(Tensor<DType, D1, LAYOUT>& other)
         {
-            const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
-            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
-            ptr += shape.getStride(0) * i;
-            Shape<D - 1> out_shape = stripOuterDim(shape);
-            return Tensor<const DTYPE, D - 1>(ptr, std::move(out_shape));
+            static_assert(D > D1, "Can only construct a larger tensor from a smaller one by implicitly unsqueezing outer dimensions");
+            m_shape = other.getShape();
+            m_ptr = other.data();
         }
 
-        template <class... ARGS>
-        const DTYPE& operator()(ARGS&&... args) const
+        template<class DType>
+        Tensor(Tensor<DType, D+1, LAYOUT>& raw_data_tensor, typename std::enable_if<!std::is_same<DType, T>::value>::type* = nullptr)
         {
-            return *static_cast<const DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
-        }
-
-        Tensor<const DTYPE, D - 1> squeeze(uint8_t dim) const
-        {
-            const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
-            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
-            assert(shape[dim] == 1);
-            Shape<D - 1> out_shape = squeezeDim(dim, shape);
-            return Tensor<const DTYPE, D - 1>(ptr, out_shape);
-        }
-
-        void copyTo(Tensor<DTYPE, D> dst) const
-        {
-            const Shape<D>& dst_shape = dst.getShape();
-            const Shape<D>& src_shape = static_cast<const DERIVED*>(this)->getShape();
-            assert(dst_shape[0] == src_shape[0]);
-            for (uint32_t i = 0; i < dst_shape[0]; ++i)
+            using types = typename ct::GlobMemberObjects<T>::types;
+            static_assert(IsSame<DType, types>::value, "");
+            static_assert(sizeof(T) == sizeof(DType) * types::size(), "All parts of the object must be considered for reflection");
+            const auto& shape = raw_data_tensor.getShape();
+            if(shape.getStride(D) != 1)
             {
-                (*this)[i].copyTo(dst[i]);
+                throw std::runtime_error("Trying to recover a tensor of an aggregate type from a raw tensor with non continuous stride");
+            }
+            m_ptr = ct::ptrCast<T>(raw_data_tensor.data());
+            for(uint32_t i = 0; i < D; ++i)
+            {
+                m_shape.setShape(i, shape[i]);
+                m_shape.setStride(i, shape.getStride(i) / types::size());
             }
         }
 
-        // void const or non const based on what T is
-        template <uint8_t N>
-        operator Tensor<const void, N, typename std::enable_if<greater(N, D)>::type>() const
+        template<class OBJ>
+        Tensor(Tensor<OBJ, D-1, LAYOUT>& aggregate_type_tensor, typename std::enable_if<!std::is_same<OBJ, T>::value>::type* = nullptr)
         {
-            Shape<N> out_shape;
-            const Shape<D>& shape = static_cast<const DERIVED*>(this)->getShape();
-            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
-            // TODO more than just unsqueeze
-            unsqueeze(shape, out_shape, N - 1);
-            return Tensor<const void, N>(ptr, out_shape);
+            using types = typename ct::GlobMemberObjects<OBJ>::types;
+            static_assert(IsSame<T, types>::value, "All types of the aggregate object must match type of wrapping tensor");
+            static_assert(sizeof(OBJ) == sizeof(T) * types::size(), "All parts of the object must be considered for reflection");
+            m_ptr = ct::ptrCast<T>(aggregate_type_tensor.data());
+            const auto& shape = aggregate_type_tensor.getShape();
+            for(uint8_t i = 0; i < D - 1; ++i)
+            {
+                m_shape.setShape(i, shape[i]);
+                m_shape.setStride(i, shape.getStride(i) * types::size());
+            }
+            m_shape.setShape(D-1, types::size());
+            m_shape.setStride(D-1, 1);
+        }
+
+        Tensor& operator=(const Tensor& other)
+        {
+            // Copy contents from other into this
+            const size_t outer_dim = m_shape[0];
+            assert(outer_dim == other.m_shape[0]);
+            for(size_t i = 0; i < outer_dim; ++i)
+            {
+                (*this)[i] = other[i];
+            }
+            return *this;
+        }
+
+        Tensor& operator=(Tensor&&) = default;
+
+        template <class... ARGS>
+        T* ptr(ARGS&&... args)
+        {
+            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            return &m_ptr[index];
+        }
+
+        template <class... ARGS>
+        const T* ptr(ARGS&&... args) const
+        {
+            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            return &m_ptr[index];
+        }
+
+        template <class... ARGS>
+        T& operator()(ARGS&& ... args)
+        {
+            return *ptr(std::forward<ARGS>(args)...);
+        }
+
+        template <class... ARGS>
+        const T& operator()(ARGS&& ... args) const
+        {
+            return *ptr(std::forward<ARGS>(args)...);
+        }
+
+        MT_XINLINE const LAYOUT<D>& getShape() const { return m_shape; }
+
+        MT_XINLINE const T* data() const { return m_ptr; }
+
+        MT_XINLINE T* data() { return m_ptr; }
+
+        Tensor<const T, D-1> operator[](const size_t idx) const
+        {
+            Shape<D-1> out_shape = m_shape.minorShape();
+            const size_t offset = m_shape.index(idx);
+            const T* ptr = m_ptr + offset;
+            return Tensor<const T, D-1>(ptr, out_shape);
+        }
+
+        Tensor<T, D-1> operator[](const size_t idx)
+        {
+            Shape<D-1> out_shape = m_shape.minorShape();
+            const size_t offset = m_shape.index(idx);
+            T* ptr = m_ptr + offset;
+            return Tensor<T, D-1>(ptr, out_shape);
         }
     };
 
-    template <class DERIVED, class DTYPE>
-    class ConstTensorIndexing<DERIVED, DTYPE, 1>
+    template <class T, uint8_t D, template<uint8_t> class LAYOUT>
+    class Tensor<const T, D, LAYOUT>
     {
+        const T* m_ptr;
+        LAYOUT<D> m_shape;
+        template<class U>
+        using IsSame = std::is_same<T, U>;
+
+      public:
+        static constexpr const uint8_t DIM = D;
+        using DType = T;
+
+        Tensor(const T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
+
+        Tensor(const Tensor<const T, D, LAYOUT>& other) = default;
+
+        Tensor(const Tensor<T, D>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        template<uint8_t D1>
+        Tensor(const Tensor<const DType, D1, LAYOUT>& other)
+        {
+            static_assert(D > D1, "Can only construct a larger tensor from a smaller one by implicitly unsqueezing outer dimensions");
+            m_shape = other.getShape();
+            m_ptr = other.data();
+        }
+
+        template<class OBJ>
+        Tensor(Tensor<OBJ, D-1, LAYOUT>& aggregate_type_tensor)
+        {
+            using types = typename ct::GlobMemberObjects<OBJ>::types;
+            static_assert(types::template all<IsSame>(), "All types of the aggregate object must match type of wrapping tensor");
+            static_assert(sizeof(OBJ) == sizeof(T) * types::size(), "All parts of the object must be considered for reflection");
+            m_ptr = ct::ptrCast<T>(aggregate_type_tensor.data());
+            const auto& shape = aggregate_type_tensor.getShape();
+            for(uint8_t i = 0; i < D - 1; ++i)
+            {
+                m_shape.setShape(i, shape[i]);
+                m_shape.setStride(i, shape.getStride(i) * types::size());
+            }
+            m_shape.setShape(D-1, types::size());
+            m_shape.setStride(D-1, 1);
+        }
+
+        Tensor& operator=(const Tensor& other)
+        {
+            // Copy contents from other into this
+            const size_t outer_dim = m_shape[0];
+            assert(outer_dim == other.m_shape[0]);
+            for(size_t i = 0; i < outer_dim; ++i)
+            {
+                (*this)[i] = other[i];
+            }
+            return *this;
+        }
+
+        Tensor& operator=(Tensor&&) = default;
+
+        template <class... ARGS>
+        const T* ptr(ARGS&&... args) const
+        {
+            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            return &m_ptr[index];
+        }
+
+        template <class... ARGS>
+        const T& operator()(ARGS&& ... args) const
+        {
+            return *ptr(std::forward<ARGS>(args)...);
+        }
+
+        MT_XINLINE const LAYOUT<D>& getShape() const { return m_shape; }
+
+        MT_XINLINE const T* data() const { return m_ptr; }
+
+        Tensor<const T, D-1> operator[](const size_t idx) const
+        {
+            LAYOUT<D-1> out_shape = m_shape.minorShape();
+            const size_t offset = m_shape.index(idx);
+            const T* ptr = m_ptr + offset;
+            return Tensor<const T, D-1>(ptr, out_shape);
+        }
+    };
+
+    /**
+     * @brief The Tensor class 1d mutable specialization
+     */
+    template <class T, template<uint8_t> class LAYOUT>
+    class Tensor<T, 1, LAYOUT>
+    {
+        T* m_ptr;
+        LAYOUT<1> m_shape;
+
       public:
         static constexpr const uint8_t DIM = 1;
-        using DType = DTYPE;
-        const DTYPE& operator[](uint32_t i) const { return *static_cast<const DERIVED*>(this)->ptr(i); }
-        template <class... ARGS>
-        const DTYPE& operator()(ARGS&&... args) const
-        {
-            return *static_cast<const DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
-        }
-        void copyTo(Tensor<DTYPE, 1> dst) const
-        {
-            const Shape<1>& dst_shape = dst.getShape();
-            assert(dst_shape[0] == static_cast<const DERIVED*>(this)->getShape()[0]);
-            for (uint32_t i = 0; i < dst_shape[0]; ++i)
-            {
-                dst[i] = (*this)[i];
-            }
-        }
+        using DType = T;
 
-        template <uint8_t N>
-        operator Tensor<const void, N, typename std::enable_if<greater(N, 1)>::type>() const
-        {
-            Shape<N> out_shape;
-            const Shape<1>& shape = static_cast<const DERIVED*>(this)->getShape();
-            const DTYPE* ptr = static_cast<const DERIVED*>(this)->data();
-            // TODO more than just unsqueeze
-            unsqueeze(shape, out_shape, N - 1);
-            return Tensor<const void, N>(ptr, out_shape);
-        }
-    };
-
-    template <class DERIVED, class DTYPE, uint8_t D, class Enable = void>
-    class TensorIndexing : public ConstTensorIndexing<DERIVED, DTYPE, D>
-    {
-      public:
-        Tensor<DTYPE, D - 1> operator[](uint32_t i)
-        {
-            const Shape<D> shape = static_cast<DERIVED*>(this)->getShape();
-            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
-            ptr += shape.getStride(0) * i;
-            Shape<D - 1> out_shape = stripOuterDim(shape);
-            return Tensor<DTYPE, D - 1>(ptr, std::move(out_shape));
-        }
-
-        template <class... ARGS>
-        DTYPE& operator()(ARGS&&... args)
-        {
-            return *static_cast<DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
-        }
-
-        Tensor<DTYPE, D - 1> squeeze(uint8_t dim)
-        {
-            const Shape<D>& shape = static_cast<DERIVED*>(this)->getShape();
-            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
-            assert(shape[dim] == 1);
-            Shape<D - 1> out_shape = squeezeDim(dim, shape);
-            return Tensor<DTYPE, D - 1>(ptr, out_shape);
-        }
-
-        // void const or non const based on what T is
-        template <uint8_t N>
-        operator Tensor<void, N, typename std::enable_if<greater(N, D)>::type>()
-        {
-            Shape<N> out_shape;
-            const Shape<D>& shape = static_cast<DERIVED*>(this)->getShape();
-            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
-            // TODO more than just unsqueeze
-            unsqueeze(shape, out_shape, N - 1);
-            return Tensor<void, N>(ptr, out_shape);
-        }
-    };
-
-    template <class DERIVED, class DTYPE>
-    class TensorIndexing<DERIVED, DTYPE, 1, typename std::enable_if<!std::is_const<DTYPE>::value>::type>
-        : public ConstTensorIndexing<DERIVED, DTYPE, 1>
-    {
-      public:
-        DTYPE& operator[](uint32_t i) { return *static_cast<DERIVED*>(this)->ptr(i); }
-
-        template <class... ARGS>
-        DTYPE& operator()(ARGS&&... args)
-        {
-            return *static_cast<DERIVED*>(this)->ptr(std::forward<ARGS>(args)...);
-        }
-
-        template <uint8_t N>
-        operator Tensor<void, N, typename std::enable_if<greater(N, 1)>::type>()
-        {
-            Shape<N> out_shape;
-            const Shape<1>& shape = static_cast<DERIVED*>(this)->getShape();
-            DTYPE* ptr = static_cast<DERIVED*>(this)->data();
-            // TODO more than just unsqueeze
-            unsqueeze(shape, out_shape, N - 1);
-            return Tensor<void, N>(ptr, out_shape);
-        }
-    };
-
-    template <class DERIVED, uint8_t D>
-    class TensorIndexing<DERIVED, void, D>
-    {
-    };
-
-    template <class DERIVED, uint8_t D>
-    class TensorIndexing<DERIVED, const void, D>
-    {
-    };
-
-    template <class DERIVED, class DTYPE, uint8_t D>
-    class TensorIndexing<DERIVED, const DTYPE, D> : public ConstTensorIndexing<DERIVED, DTYPE, D>
-    {
-    };
-
-    template <class T, uint8_t D>
-    class Tensor<T,
-                 D,
-                 typename std::enable_if<!std::is_same<typename std::remove_const<T>::type, void>::value &&
-                                         greater(D, 1)>::type> // is not void and is not 0 dimensional
-        : public TensorIndexing<Tensor<T, D>, T, D>
-    {
-        T* m_ptr;
-        Shape<D> m_shape;
-
-      public:
-        Tensor(T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
-        Tensor(Tensor<T, D>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
-        Tensor(const Tensor& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
-        Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
-
-        Tensor& operator=(const Tensor&) = default;
-        Tensor& operator=(Tensor&&) = default;
-
-        Tensor& operator=(const std::vector<T>& data)
-        {
-            assert(data.size() == m_shape.numElements());
-            const size_t size = m_shape.numElements();
-            for (size_t i = 0; i < size; ++i)
-            {
-                // This accounts for reverse indexing, etc
-                const size_t idx = m_shape.index(i);
-                m_ptr[idx] = data[i];
-            }
-            return *this;
-        }
-
-        template <class... ARGS>
-        T* ptr(ARGS&&... args)
-        {
-            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
-            return &m_ptr[index];
-        }
-
-        template <class... ARGS>
-        const T* ptr(ARGS&&... args) const
-        {
-            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
-            return &m_ptr[index];
-        }
-
-        template <uint8_t N>
-        operator Tensor<T, N, typename std::enable_if<greater(N, D)>::type>()
-        {
-        }
-
-        MT_XINLINE Shape<D> getShape() const { return m_shape; }
-        MT_XINLINE const T* data() const { return m_ptr; }
-        MT_XINLINE T* data() { return m_ptr; }
-    };
-
-    template <class T>
-    class Tensor<T,
-                 1,
-                 typename std::enable_if<!std::is_same<typename std::remove_const<T>::type,
-                                                       void>::value>::type> // is not void
-        : public TensorIndexing<Tensor<T, 1>, T, 1>
-    {
-        T* m_ptr;
-        Shape<1> m_shape;
-
-      public:
         Tensor(T* ptr = nullptr, Shape<1> shape = Shape<1>()) : m_ptr(ptr), m_shape(shape) {}
+
         Tensor(Tensor<T, 1>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
         Tensor(const Tensor& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
         Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
 
-        Tensor& operator=(const Tensor&) = default;
+        Tensor(std::vector<T>& vec) : m_ptr(vec.data()), m_shape(vec.size()) {}
+
+        Tensor(ct::TArrayView<T> view): m_ptr(view.data()), m_shape(view.size()) {}
+
+
         Tensor& operator=(Tensor&&) = default;
 
         Tensor& operator=(const std::vector<T>& data)
         {
-            assert(data.size() == m_shape.numElements());
+            if(data.size() != m_shape.numElements())
+            {
+                throw std::runtime_error("Input data vector does not match size of tensor, cannot copy elements");
+            }
             const size_t size = m_shape.numElements();
             for (size_t i = 0; i < size; ++i)
             {
@@ -281,131 +313,315 @@ namespace mt
             return *this;
         }
 
-        template <class... ARGS>
-        T* ptr(ARGS&&... args)
+        Tensor& operator=(const Tensor& other)
         {
-            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            const uint32_t N = std::min(m_shape[0], other.m_shape[0]);
+            for(uint32_t i = 0; i < N; ++i)
+            {
+                (*this)[i] = other[i];
+            }
+            return *this;
+        }
+
+        Tensor& operator=(const Tensor<const T, 1>& other)
+        {
+            const uint32_t N = std::min(m_shape[0], other.getShape()[0]);
+            for(uint32_t i = 0; i < N; ++i)
+            {
+                (*this)[i] = other[i];
+            }
+            return *this;
+        }
+
+        T* ptr(const uint32_t idx)
+        {
+            const size_t index = m_shape.index(idx);
             return &m_ptr[index];
         }
 
-        template <class... ARGS>
-        const T* ptr(ARGS&&... args) const
+        const T* ptr(const uint32_t idx) const
         {
-            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            const size_t index = m_shape.index(idx);
             return &m_ptr[index];
         }
 
-        template <uint8_t N>
-        operator Tensor<T, N, typename std::enable_if<greater(N, 1)>::type>()
+
+        T& operator()(const uint32_t idx)
         {
+            return *ptr(idx);
+        }
+
+        const T& operator()(const uint32_t idx) const
+        {
+            return *ptr(idx);
+        }
+
+        MT_XINLINE const LAYOUT<1>& getShape() const { return m_shape; }
+
+        MT_XINLINE const T* data() const { return m_ptr; }
+
+        MT_XINLINE T* data() { return m_ptr; }
+
+        const T& operator[](const size_t idx) const
+        {
+            return *ptr(idx);
+        }
+
+        T& operator[](const size_t idx)
+        {
+            return *ptr(idx);
+        }
+
+        operator ct::TArrayView<const T>() const
+        {
+            // TODO assert on continuous
+            return ct::TArrayView<const T>(m_ptr, m_shape[0]);
         }
 
         operator ct::TArrayView<T>()
         {
-            assert(m_shape.isContinuous());
+            // TODO assert on continuous
             return ct::TArrayView<T>(m_ptr, m_shape[0]);
         }
-
-        MT_XINLINE Shape<1> getShape() const { return m_shape; }
-        MT_XINLINE const T* data() const { return m_ptr; }
-        MT_XINLINE T* data() { return m_ptr; }
     };
 
-    // void specialization
-    template <class T, uint8_t D>
-    class Tensor<T, D, typename std::enable_if<std::is_same<typename std::remove_const<T>::type, void>::value>::type>
-        : public TensorIndexing<Tensor<T, D>, T, D>
+    template <class T, template<uint8_t> class LAYOUT>
+    class Tensor<const T, 1, LAYOUT>
     {
-        T* m_ptr;
-        Shape<D> m_shape;
+        const T* m_ptr;
+        LAYOUT<1> m_shape;
 
       public:
-        Tensor(T* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
+        static constexpr const uint8_t DIM = 1;
+        using DType = T;
+
+        Tensor(const T* ptr = nullptr, Shape<1> shape = Shape<1>()) : m_ptr(ptr), m_shape(shape) {}
+
+        /**
+         * @brief Tensor copy from const tensor to non const data
+         * @param other
+         */
+        Tensor(const Tensor<T, 1>& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor(const Tensor& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor(Tensor&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor(Tensor<T, 1>&& other) : m_ptr(other.data()), m_shape(other.getShape()) {}
+
+        Tensor(const std::vector<T>& vec) : m_ptr(vec.data()), m_shape(vec.size()) {}
+
+        Tensor(const ct::TArrayView<const T> view): m_ptr(view.data()), m_shape(view.size()) {}
+
+        Tensor(const ct::TArrayView<T> view): m_ptr(view.data()), m_shape(view.size()) {}
+
+        Tensor& operator=(Tensor&&) = default;
+
+
+        const T* ptr(const uint32_t idx) const
+        {
+            const size_t index = m_shape.index(idx);
+            return &m_ptr[index];
+        }
+
+        const T& operator()(const uint32_t idx) const
+        {
+            return *ptr(idx);
+        }
+
+        MT_XINLINE const Shape<1>& getShape() const { return m_shape; }
+
+        MT_XINLINE const T* data() const { return m_ptr; }
+
+        const T& operator[](const uint32_t idx) const
+        {
+            return *ptr(idx);
+        }
+
+        operator ct::TArrayView<const T>() const
+        {
+            // TODO assert on continuous
+            return ct::TArrayView<const T>(m_ptr, m_shape[0]);
+        }
+    };
+
+    /**
+     * @brief The Tensor class void specialization
+     */
+    template <uint8_t D, template<uint8_t> class LAYOUT>
+    class Tensor<void, D, LAYOUT>
+    {
+        void* m_ptr;
+        LAYOUT<D> m_shape;
+
+      public:
+        static constexpr const uint8_t DIM = D;
+        using DType = void;
+
+        Tensor(void* ptr = nullptr, Shape<D> shape = Shape<D>()) : m_ptr(ptr), m_shape(shape) {}
 
         template <class U>
-        Tensor(Tensor<U, D>& other) : m_ptr(static_cast<void*>(other.data()))
+        Tensor(Tensor<U, D, LAYOUT>& other) : m_ptr(static_cast<void*>(other.data()))
         {
-            const Shape<D>& other_shape = other.getShape();
+            const LAYOUT<D>& other_shape = other.getShape();
             m_shape = copyScaled<sizeof(U), 1>(other_shape);
         }
 
         template <class U>
-        Tensor(Tensor<U, D>&& other) : m_ptr(static_cast<T*>(other.data()))
+        Tensor(Tensor<U, D, LAYOUT>&& other) : m_ptr(static_cast<void*>(other.data()))
         {
-            const Shape<D>& other_shape = other.getShape();
+            const LAYOUT<D>& other_shape = other.getShape();
             m_shape = copyScaled<sizeof(U), 1>(other_shape);
         }
 
-        Tensor(Tensor& other) : m_ptr(other.data())
+        template <class U, uint8_t D2>
+        Tensor(Tensor<U, D2, LAYOUT>&& other) : m_ptr(static_cast<void*>(other.data()))
         {
-            const Shape<D>& other_shape = other.getShape();
-            m_shape = other.m_shape;
+            const LAYOUT<D2>& other_shape = other.getShape();
+            m_shape = copyScaled<sizeof(U), 1>(other_shape);
         }
 
-        Tensor(Tensor&& other) : m_ptr(other.data()) { m_shape = other.m_shape; }
+        Tensor(Tensor& other) = default;
 
-        Tensor& operator=(const Tensor&) = default;
+        Tensor(Tensor&& other) = default;
+
+        Tensor& operator=(const Tensor& other)
+        {
+            // Copy contents from other into this
+            const size_t outer_dim = m_shape[0];
+            assert(outer_dim == other.m_shape[0]);
+            for(size_t i = 0; i < outer_dim; ++i)
+            {
+                (*this)[i] = other[i];
+            }
+            return *this;
+        }
+
         Tensor& operator=(Tensor&&) = default;
 
         template <class... ARGS>
-        const T* ptr(ARGS&&... args) const
+        const void* ptr(ARGS&&... args) const
         {
             const size_t index = m_shape.index(std::forward<ARGS>(args)...);
-            return m_ptr + index;
+            return ct::ptrCast<void>(ct::ptrCast<uint8_t>(m_ptr) + index);
         }
 
         template <class... ARGS>
-        T* ptr(ARGS&&... args)
+        void* ptr(ARGS&&... args)
         {
             const size_t index = m_shape.index(std::forward<ARGS>(args)...);
-            return m_ptr + index;
+            return ct::ptrCast<void>(ct::ptrCast<uint8_t>(m_ptr) + index);
         }
 
-        MT_XINLINE const Shape<D>& getShape() const { return m_shape; }
-        MT_XINLINE const T* data() const { return m_ptr; }
-        MT_XINLINE T* data() { return m_ptr; }
+        MT_XINLINE const LAYOUT<D>& getShape() const { return m_shape; }
+
+        MT_XINLINE const void* data() const { return m_ptr; }
+
+        MT_XINLINE void* data() { return m_ptr; }
 
         template <class U>
         operator Tensor<U, D>()
         {
-            Shape<D> out_shape = copyScaled<1, sizeof(U)>(m_shape);
+            LAYOUT<D> out_shape = copyScaled<1, sizeof(U)>(m_shape);
             return Tensor<U, D>(static_cast<U*>(m_ptr), std::move(out_shape));
         }
 
-        template <uint8_t N>
-        operator Tensor<void, N, typename std::enable_if<greater(N, D)>::type>()
+        template <class U>
+        operator Tensor<const U, D>() const
         {
+            LAYOUT<D> out_shape = copyScaled<1, sizeof(U)>(m_shape);
+            return Tensor<U, D>(static_cast<const U*>(m_ptr), std::move(out_shape));
+        }
+    };
+
+
+    /**
+     * @brief The Tensor class const void specialization
+     */
+    template <uint8_t D, template<uint8_t> class LAYOUT>
+    class Tensor<const void, D, LAYOUT>
+    {
+        const void* m_ptr;
+        LAYOUT<D> m_shape;
+
+      public:
+        static constexpr const uint8_t DIM = D;
+        using DType = void;
+
+        Tensor(const void* ptr = nullptr, LAYOUT<D> shape = LAYOUT<D>()) : m_ptr(ptr), m_shape(shape) {}
+
+
+        Tensor(Tensor<const void, D, LAYOUT>& other) = default;
+
+        Tensor(Tensor<const void, D, LAYOUT>&& other) = default;
+
+
+        template <class U, uint8_t D2, template<uint8_t> class L2>
+        Tensor(Tensor<U, D2, L2>& other) : m_ptr(static_cast<const void*>(other.data()))
+        {
+            const LAYOUT<D>& other_shape = other.getShape();
+            m_shape = copyScaled<SafeSizeOf<U>::value, 1>(other_shape);
+        }
+
+        template <class U, uint8_t D2, template<uint8_t> class L2>
+        Tensor(Tensor<U, D2, L2>&& other) : m_ptr(static_cast<const void*>(other.data()))
+        {
+            const LAYOUT<D>& other_shape = other.getShape();
+            m_shape = copyScaled<SafeSizeOf<U>::value, 1>(other_shape);
+        }
+
+        Tensor& operator=(const Tensor&) = delete;
+
+        Tensor& operator=(Tensor&&) = default;
+
+        template <class... ARGS>
+        const void* ptr(ARGS&&... args) const
+        {
+            const size_t index = m_shape.index(std::forward<ARGS>(args)...);
+            return ct::ptrCast<void>(ct::ptrCast<uint8_t>(m_ptr) + index);
+        }
+
+        MT_XINLINE const LAYOUT<D>& getShape() const { return m_shape; }
+
+        MT_XINLINE const void* data() const { return m_ptr; }
+
+        template <class U>
+        operator Tensor<const U, D, LAYOUT>() const
+        {
+            LAYOUT<D> out_shape = copyScaled<1, sizeof(U)>(m_shape);
+            return Tensor<const U, D>(static_cast<const U*>(m_ptr), std::move(out_shape));
         }
     };
 
     // scalar value specialization
-    template <class T>
-    class Tensor<T, 0, void>
+    template <class T, template<uint8_t> class LAYOUT>
+    class Tensor<T, 0, LAYOUT>
     {
         T* m_ptr;
 
       public:
         static constexpr const uint8_t DIM = 0;
         using DType = T;
-        Tensor(T* ptr = nullptr, Shape<0> = Shape<0>()) : m_ptr(ptr) {}
+
+        Tensor(T* ptr = nullptr, LAYOUT<0> = LAYOUT<0>()) : m_ptr(ptr) {}
 
         template <class... ARGS>
-        const T* ptr(ARGS&&... args) const
+        const T* ptr(ARGS&&... ) const
         {
             return m_ptr;
         }
 
         template <class... ARGS>
-        T* ptr(ARGS&&... args)
+        T* ptr(ARGS&&... )
         {
             return m_ptr;
         }
 
-        T& operator[](size_t idx) { return *m_ptr; }
+        T& operator[](size_t) { return *m_ptr; }
 
-        const T& operator[](size_t idx) const { return *m_ptr; }
+        const T& operator[](size_t) const { return *m_ptr; }
 
-        void copyTo(Tensor<typename std::remove_const<T>::type, 0, void> dst) const { *dst.data() = *m_ptr; }
+        void copyTo(Tensor<typename std::remove_const<T>::type, 0> dst) const { *dst.data() = *m_ptr; }
 
         template <class U>
         void copyTo(U&& dst) const
@@ -413,19 +629,66 @@ namespace mt
             dst = *m_ptr;
         }
 
-        MT_XINLINE Shape<0> getShape() const { return Shape<0>(); }
+        MT_XINLINE LAYOUT<0> getShape() const { return LAYOUT<0>(); }
+
         MT_XINLINE const T* data() const { return m_ptr; }
+
         MT_XINLINE T* data() { return m_ptr; }
 
-        template <uint8_t N>
-        operator Tensor<T, N, typename std::enable_if<greater(N, 0)>::type>()
+        template<class U>
+        operator U&()
         {
+            return *m_ptr;
         }
 
-        template <uint8_t N>
-        operator Tensor<void, N, typename std::enable_if<greater(N, 0)>::type>()
+        template<class U>
+        operator U() const
         {
+            return *m_ptr;
         }
+    };
+
+    template <class T, template<uint8_t> class LAYOUT>
+    class Tensor<const T, 0, LAYOUT>
+    {
+        const T* m_ptr;
+
+      public:
+        static constexpr const uint8_t DIM = 0;
+        using DType = T;
+
+        Tensor(const T* ptr = nullptr, LAYOUT<0> = LAYOUT<0>()) : m_ptr(ptr) {}
+
+        template <class... ARGS>
+        const T* ptr(ARGS&&...) const
+        {
+            return m_ptr;
+        }
+
+        const T& operator[](size_t) const { return *m_ptr; }
+
+        void copyTo(Tensor<typename std::remove_const<T>::type, 0> dst) const { *dst.data() = *m_ptr; }
+
+        template <class U>
+        void copyTo(U&& dst) const
+        {
+            dst = *m_ptr;
+        }
+
+        MT_XINLINE LAYOUT<0> getShape() const { return LAYOUT<0>(); }
+
+        MT_XINLINE const T* data() const { return m_ptr; }
+
+        template<class U>
+        operator U() const
+        {
+            return *m_ptr;
+        }
+
+        /*operator T() const
+        {
+            return *m_ptr;
+        }*/
     };
 
     ///////////////////////////////////////////////////////////////////////////
@@ -576,6 +839,18 @@ namespace mt
     auto tensorWrap(T& data) -> decltype(TensorWrap<T>::wrap(data))
     {
         return TensorWrap<T>::wrap(data);
+    }
+
+    template <class T, uint8_t N, template<uint8_t> class LAYOUT>
+    auto tensorWrap(const Tensor<T, N, LAYOUT>& data) -> Tensor<T, N, LAYOUT>
+    {
+        return data;
+    }
+
+    template <class T, uint8_t N, template<uint8_t> class LAYOUT>
+    auto tensorWrap(Tensor<T, N, LAYOUT>& data) -> Tensor<T, N, LAYOUT>
+    {
+        return data;
     }
 
 } // namespace mt

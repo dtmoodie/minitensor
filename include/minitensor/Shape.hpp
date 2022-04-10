@@ -25,83 +25,80 @@ namespace mt
         }
 
       public:
-        Shape(const Shape& other):
-            m_size(other.m_size), m_stride(other.m_stride)
-        {
-
-        }
-        Shape(Shape& other):
-            m_size(other.m_size), m_stride(other.m_stride)
-        {
-
-        }
-        Shape(Shape&& other):
-            m_size(other.m_size), m_stride(other.m_stride)
-        {
-
-        }
+        Shape(const Shape& other) : m_size(other.m_size), m_stride(other.m_stride) {}
+        Shape(Shape& other) : m_size(other.m_size), m_stride(other.m_stride) {}
+        Shape(Shape&& other) : m_size(other.m_size), m_stride(other.m_stride) {}
 
         Shape& operator=(const Shape& other) = default;
+
         Shape& operator=(Shape&& other) = default;
 
-        template<uint8_t N1>
+        template <uint8_t N1>
         Shape(Shape<N1>& other)
         {
-            static_assert(N1 < N,"");
+            static_assert(N1 < N, "");
             const uint8_t padded = N - N1;
             int16_t i;
-            for(i = 0; i < padded; ++i)
+            for (i = 0; i < padded; ++i)
             {
                 m_size[i] = 1;
             }
-            for(; i < N; ++i)
+            for (; i < N; ++i)
             {
                 m_size[i] = other[i - padded];
                 m_stride[i] = other.getStride(i - padded);
             }
-            for(i = padded - 1; i >= 0; --i)
+            for (i = padded - 1; i >= 0 && i + 1 < N; --i)
             {
                 m_stride[i] = m_size[i + 1] * m_stride[i + 1];
             }
+            if(N1 == 0)
+            {
+                m_stride[N - 1] = 1;
+            }
         }
 
-        template<uint8_t N1>
+        template <uint8_t N1>
         Shape(const Shape<N1>& other)
         {
-            static_assert(N1 < N,"");
+            static_assert(N1 < N, "");
             const uint8_t padded = N - N1;
             int16_t i;
-            for(i = 0; i < padded; ++i)
+            for (i = 0; i < padded; ++i)
             {
                 m_size[i] = 1;
             }
-            for(; i < N; ++i)
+            for (; i < N; ++i)
             {
                 m_size[i] = other[i - padded];
                 m_stride[i] = other.getStride(i - padded);
             }
-            for(i = padded - 1; i >= 0; --i)
+            for (i = padded - 1; i >= 0 && i+1 < N; --i)
             {
                 m_stride[i] = m_size[i + 1] * m_stride[i + 1];
             }
+            if(N1 == 0)
+            {
+                m_stride[N - 1] = 1;
+            }
         }
 
-        template<uint8_t N1>
+        template <uint8_t N1>
         Shape(Shape<N1>&& other)
         {
-            static_assert(N1 < N,"");
+            static_assert(N1 < N, "");
             const uint8_t padded = N - N1;
             int16_t i;
-            for(i = 0; i < padded; ++i)
+            for (i = 0; i < padded; ++i)
             {
                 m_size[i] = 1;
             }
-            for(; i < N; ++i)
+            for (; i < N; ++i)
             {
                 m_size[i] = other[i - padded];
                 m_stride[i] = other.getStride(i - padded);
             }
-            for(i = padded - 1; i >= 0; --i)
+            for (i = padded - 1; i >= 0; --i)
             {
                 m_stride[i] = m_size[i + 1] * m_stride[i + 1];
             }
@@ -133,8 +130,9 @@ namespace mt
          *        | 4,  5,  6, 7
          *        | 8,  9, 10, 11
          *        |12, 13, 14, 15
-         *        The 5th element has a value of 5 and 2d index of 1,1.  Linear index will return the offset from the beginning of the data
-         *        block to where the element is.  This important distinction is due to the fact that reversed
+         *        The 5th element has a value of 5 and 2d index of 1,1.  Linear index will return the offset from the
+         * beginning of the data block to where the element is.  This important distinction is due to the fact that
+         * reversed
          * @param idx
          * @return
          */
@@ -154,7 +152,7 @@ namespace mt
         Shape<N - 1> minorShape() const
         {
             Shape<N - 1> output;
-            for(uint8_t i = 1; i < N; ++i)
+            for (uint8_t i = 1; i < N; ++i)
             {
                 output.setStride(i - 1, m_stride[i]);
                 output.setShape(i - 1, m_size[i]);
